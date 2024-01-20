@@ -1,0 +1,92 @@
+;; This program generates a venetian rainbow effect on screen.
+;;
+
+; Assembler should use basic 6502 instructions
+        processor 6502
+        
+; Include files for Atari 2600 constants and handy macro routines
+        include "vcs.h"
+        include "macro.h"
+        
+; 4K Atari 2600 ROMs start at address $F000
+        seg Code
+        org  $f000
+
+; Define a RAM variable which will hold our background colors:
+BGColor         equ $81
+
+;; Cartridge initialization segment
+;;
+
+; Initialize flags + registers when the cartridge starts.
+; This time, we're using the CLEAN_START macro which is 
+; memory optimized:
+Start
+        CLEAN_START
+        
+;; Frame output
+;;
+
+; The VCS lacks the concept of a frame buffer. Instead we need 
+; to manually sync with the scan lines, vertically and horizontally.
+; Let's start with vertical sync. An NTSC frame starts with 3 scan lines 
+; of VSYNC, followed by 37 lines of VBLANK. Enable these bits in the TIA:
+NextFrame
+        lda #2 ; binary #%00000010 to enable the TIA VBLANK and VSYNC
+        sta VBLANK
+        sta VSYNC
+        ; wait for the 3 VSYNC lines, Note that WSYNC doesn't 
+        ; care which value we store -- the moment it receives a write, it 
+        ; halts the CPU:
+        sta WSYNC       ; scanline 1
+        sta WSYNC       ; scanline 2
+        sta WSYNC       ; scanline 3
+        lda #0
+        sta VSYNC       ; turn of VSYNC
+        ; now we need to do the same for the 37 lines of VBLANK.
+        ; Again, the value written to WSYNC is unimportant:
+        ldx #37
+SyncVBlank
+        sta WSYNC
+        dex
+        bne SyncVBlank  ; unti X is zero
+        lda #0
+        sta VBLANK      ; turn of VBLANK
+        ; Venetian rainbow effect:
+        ; ------------------------
+        ; We're now at the 192 lines of visible frame.
+        ; Loop through them, use a different background color for 
+        ; each line, and then of course syncing each horizonal line.
+        ldx #192        ; count the scan lines
+        ldy BGColor     ; load the current background color from our RAM variable
+LVScan
+        sty COLUBK      ; set the background color
+        sta WSYNC       ; wait for the next scanline
+        ; we're now in the horizonal scan phase (HBLANK) where the electron beam 
+        ; resets. Use this timeslot (22 CPU cycles) to prepare the next scanline.
+        iny             ; toggle to the next background color
+        dex             ; keep track of the next scanline
+        bne LVScan
+        ; Overscan
+        ; --------
+        ; Once th visible frame has been drawn, there are 30 additional 
+        ; lines of overscan (VBLANK)
+        lda #2
+        sta VBLANK      ; turn on VBLANK again
+        ldx #30         ; 30 lines of overscan
+LVOverscan
+        sta WSYNC
+        dex
+        bne LVOverscan
+        ; Frame completed! For the next frame, we decrement BGColor.
+        ; That way, the colors will appwar to stream down the screen:
+        dec BGColor
+        jmp NextFrame
+        
+; End all code by filling out the ROM to 4K, which is the required ROM size.
+; Also, tell the 6502 where our code will Start. After reset, the 6502 reads a 
+; 16-bit address from $FFFC/$FFFD and seets the instruction pointer to the 
+; content stored at that address:
+        org $fffc
+        .word Start ; reset vector at $FFFC
+        .word Start ; interrupt vector at $FFFE (unused on the VCS)
