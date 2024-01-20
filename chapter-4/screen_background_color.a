@@ -1,0 +1,45 @@
+
+; Assembler should use basic 6502 instructions
+	processor 6502
+	
+; Include files for Atari 2600 constants and handy macro routines
+	include "vcs.h"
+	include "macro.h"
+	
+; 4K Atari 2600 ROMs start at address $F000
+	seg Code
+	org  $f000
+
+;; Cartridge initialization segment
+;;
+
+; Initialize flags + registers when the cartridge starts
+Start	sei	 ; disable interrupts -- shouldn't be needed on 6507, but idiomatic(?)
+	cld	 ; disable BCD (binary decimal) math mode
+        ldx #$ff ; init stack pointer
+        txs	 ; transfer the stack pointer init address to the S register
+        
+; On a real VCS, the zero page can be in any state after startup or reset.
+; Set memory + hardware to a known state. Clearing the zero page regision accomplishes 
+; both the TIA register reset (a black screen) + the RAM.
+	lda #0
+        ldx #$ff  ; loop backwards for the reset from $FF -> $00
+ZeroZP	sta $0,X  ; store A register at $0 + X
+	dex	  ; decrement X by one
+        bne ZeroZP
+        
+; A simple graphical effect: we set the screen's background color to red.
+; However, as we also loop over the init routine (Start) with its TIA zeroing, there 
+; will be alternativ black lines.
+        lda #$30  ; #$30 is a deep red color
+        sta COLUBK
+        
+        jmp Start ; do it all over again
+        
+; End all code by filling out the ROM to 4K, which is the required ROM size.
+; Also, tell the 6502 where our code will Start. After reset, the 6502 reads a 
+; 16-bit address from $FFFC/$FFFD and seets the instruction pointer to the 
+; content stored at that address:
+	org $fffc
+        .word Start ; reset vector at $FFFC
+        .word Start ; interrupt vector at $FFFE (unused on the VCS)
