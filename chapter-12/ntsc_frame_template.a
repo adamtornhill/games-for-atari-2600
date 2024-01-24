@@ -1,0 +1,31 @@
+	processor 6502
+	include "vcs.h"
+	include "macro.h"
+    include "xmacro.h"
+
+	org  $f000
+
+Start	CLEAN_START
+
+; A template which makes heavy use of macros to simplify how 
+; we race the beam. The code is based on the PIA timer rather 
+; than having to manually code WSYNCs. The PIA timer is set 
+; to expire shortly before the start of a sync point (e.g. VBLANK, overscan).
+
+NextFrame
+	; 262 scan lines in total.
+	VERTICAL_SYNC	; 1 VBLANK + 3 VSYNC
+    TIMER_SETUP 37	; 37 VBLANK
+    TIMER_WAIT
+    ; The 192 visible scanlines
+    TIMER_SETUP 192
+    TIMER_WAIT
+    ; Overscan
+    TIMER_SETUP 29
+    TIMER_WAIT
+	
+	jmp NextFrame
+	
+	org $fffc
+	.word Start
+	.word Start
