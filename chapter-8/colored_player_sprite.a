@@ -1,11 +1,12 @@
-	processor 6502
+    processor 6502
     include "vcs.h"
     include "macro.h"
     include "xmacro.h"
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; This cartridg draws a color sprite (i.e. VCS player object).
+; This cartridge draws a color sprite (i.e. VCS player object).
+;
 ; Player objects are based on two TIA registers:
 ;  1. GRP0 where we store the bitmap for that scanline
 ;  2. COLUP0 where we store the color for that scanline
@@ -15,64 +16,64 @@
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-SpriteHeight	equ 10
+SpriteHeight    equ 10
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
 
     seg.u Variables
-	org $80
+    org $80
 
-YPos	.byte
+YPos    .byte
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
 
-	seg Code
+    seg Code
     org $f000
 
 Start
-	CLEAN_START
+    CLEAN_START
         
     ; position our sprite. Y goes from bottom to top
-    lda #80		; fairly centered on screen
+    lda #80     ; fairly centered on screen
     sta YPos
 
 NextFrame
-	; 262 scanlines in total. Use the xmcaros to simplify 
+    ; 262 scanlines in total. Use the xmcaros to simplify 
     ; the TIA line sync during VSYNC and overscan.
-	VERTICAL_SYNC	; 1 VBLANK + 3 VSYNC
-	TIMER_SETUP 37	; 37 VBLANK
+    VERTICAL_SYNC   ; 1 VBLANK + 3 VSYNC
+    TIMER_SETUP 37  ; 37 VBLANK
     TIMER_WAIT
-	; The 192 visible scanlines have to be iterated through; we 
+    ; The 192 visible scanlines have to be iterated through; we 
     ; cannot use the PIA timer since we need to find the YPos of 
     ; our sprite and then start drawing it there.
-	ldx #192	
+    ldx #192    
 LVScan
-	; are we at the scanline where YPos for our sprite starts?
-	txa		; let A contain the current scanline
-    sec		; always set carry for subtract
-    sbc YPos	
+    ; are we at the scanline where YPos for our sprite starts?
+    txa         ; let A contain the current scanline
+    sec         ; 💡 always set carry for subtract
+    sbc YPos    
     cmp #SpriteHeight 
-    bcc InSprite	; yes, skip over the next instruction
-    lda #0		; no, so disable all sprites
+    bcc MaybeDrawSprite ; yes, skip over the next instruction
+    lda #0          ; no, so disable all sprites
     ; note that we always execute the following segment
     ; its behaviour depends on what's stored in A:
     ;  - either the lookup index for the sprite byte, or
     ;  - zero to clear the sprite register when outside the relevant scanline
-InSprite
-	tay		; local coord -> Y
-    lda CSBitmap,y	; lookup color
-    sta WSYNC	; sync w/ scanline
-    sta GRP0	; store bitmap
-    lda CSColor,y 	; lookup color
-    sta COLUP0	; store color
-    dex		; decrement X
-    bne LVScan	; repeat until 192 lines
+MaybeDrawSprite
+    tay     ; local coord -> Y
+    lda CSBitmap,y  ; lookup color
+    sta WSYNC   ; sync w/ scanline
+    sta GRP0    ; store bitmap
+    lda CSColor,y   ; lookup color
+    sta COLUP0  ; store color
+    dex     ; decrement X
+    bne LVScan  ; repeat until 192 lines
 
-	; Overscan
-	TIMER_SETUP 29
-	TIMER_WAIT
+    ; Overscan
+    TIMER_SETUP 29
+    TIMER_WAIT
     jmp NextFrame
 
 ; The sprite data in two separate tables, one 
@@ -82,7 +83,7 @@ InSprite
 ;---Graphics Data generated with PlayerPal 2600---
 
 CSBitmap
-	.byte #0        ; zero padding to clear register when outside the sprite
+    .byte #0        ; zero padding to clear register when outside the sprite
     .byte #%00000000;$94
     .byte #%00011000;$94
     .byte #%10100101;$94
@@ -95,7 +96,7 @@ CSBitmap
     .byte #%00000000;$00
 
 CSColor
-	.byte #0        ; pad to align the indicies with the CSBitmap
+    .byte #0        ; pad to align the indicies with the CSBitmap
     .byte #$94;
     .byte #$94;
     .byte #$94;
@@ -110,6 +111,6 @@ CSColor
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Pad the cartridge to 4K
 
-	org $fffc
-    .word Start	; reset vector
-    .word Start	; BRK vector
+    org $fffc
+    .word Start ; reset vector
+    .word Start ; BRK vector
