@@ -1,0 +1,171 @@
+    processor 6502
+    include "vcs.h"
+    include "macro.h"
+    include "xmacro.h"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; This cartridge animates a color sprite (i.e. VCS player object).
+; The sprite is a (very) cool software company's logo. We implement 
+; an effect where the sprite "floats" from the lower left to the 
+; upper right of the screen.
+;
+; Some Atari VCS background info: player objects are based on 
+; two TIA registers:
+;  1. GRP0 where we store the bitmap for that scanline
+;  2. COLUP0 where we store the color for that scanline
+; 
+; Implementation strategy: We implement the sprite using two 
+; tables in ROM and indirect addressing mode for the look up.
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+SpriteHeight    equ 10
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Variables segment
+
+    seg.u Variables
+    org $80
+
+YPos    .byte
+XPos    .byte
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Code segment
+
+    seg Code
+    org $f000
+
+Start
+    CLEAN_START
+        
+    ; position our sprite. Y goes from bottom to top
+    lda #0  ; start at the lower left of the screen
+    sta YPos
+    sta XPos
+
+NextFrame
+    ; 262 scanlines in total. Use the xmcaros to simplify 
+    ; the TIA line sync during VSYNC and overscan.
+    VERTICAL_SYNC   ; 1 VBLANK + 3 VSYNC
+    TIMER_SETUP 37  ; 37 VBLANK
+    ; The idle period during VBLANK is a great place for our 
+    ; sophisticated game logic. Let's use this time window 
+    ; to create the animation:
+    inc YPos
+    inc XPos
+    TIMER_WAIT
+    ; Prepare the horizontal positioning of the sprite:
+    lda XPos
+    ldx #0      ; the player 1 object
+    jsr PositionHoriz
+    sta WSYNC
+    sta HMOVE       ; updates the X-position
+    ; The 192 visible scanlines have to be iterated through; we 
+    ; cannot use the PIA timer since we need to find the YPos of 
+    ; our sprite and then start drawing it there.
+    ldx #192    
+LVScan
+    ; are we at the scanline where YPos for our sprite starts?
+    txa         ; let A contain the current scanline
+    sec         ; 💡 always set carry for subtract
+    sbc YPos    
+    cmp #SpriteHeight 
+    bcc MaybeDrawSprite ; yes, skip over the next instruction
+    lda #0          ; no, so disable all sprites
+    ; note that we always execute the following segment
+    ; its behaviour depends on what's stored in A:
+    ;  - either the lookup index for the sprite byte, or
+    ;  - zero to clear the sprite register when outside the relevant scanline
+MaybeDrawSprite
+    tay     ;       local coord -> Y
+    lda CSBitmap,y      ; lookup color
+    sta WSYNC       ; sync w/ scanline
+    sta GRP0        ; store bitmap
+    lda CSColor,y       ; lookup color
+    sta COLUP0      ; store color
+    ; Prepare for the next frame
+    dex     ; decrement X
+    bne LVScan  ; repeat until 192 lines
+
+    ; Overscan
+    TIMER_SETUP 29
+    TIMER_WAIT
+    jmp NextFrame
+
+; The horizontal positioning is, well, _interesting_ on the TIA.
+; We don't get any support from the hardware. Instead, we need to 
+; count TIA cycles (not CPU cycles, mind you) and strobe the RESP0 
+; register at precisely the time we want TIA to draw the sprite.
+;
+; FYI: one CPU cycle is three TIA clock cycles.
+;
+; The following subroutine encapsulates the positioning algorithm:
+;  * A-register: the horizontal position.
+;  * X-register: the object to position (0 = player 1, etc.)
+; 
+PositionHoriz subroutine
+    sta WSYNC   ; wait for the next scanline
+    ; To find the rough X-position, we divide by 15.
+    ; We divide by 15 since that's the number of TIA 
+    ; clock cycles consumed by our instructions in the 
+    ; loop below (sbc and bcs).
+    ;
+    ; Of course, there's no division support on the 6502 so we 
+    ; need to subtract instead until A becomes negative.
+    sec         ; Always set carry when subtracting.
+.RoughXPosition         ; The . (dot) creates a local label.
+    sbc #15
+    bcs .RoughXPosition ; Until A is negative
+    ; The fine position can be set within -7 <-> +8 pixels.
+    ; To do this, we keep the reminder from our division 
+    ; and shift those bits left into the higher nibble; the HMP0 
+    ; registers wants it there.
+    eor #7
+    asl
+    asl
+    asl
+    asl
+    sta HMP0,x      ; the fine offset..
+    sta RESP0,x     ; ..and its coarse position.
+    rts
+
+; The sprite data in two separate tables, one 
+; with the bitmap for each scanline and one 
+; with the colors.
+;
+;---Graphics Data generated with PlayerPal 2600---
+
+CSBitmap
+    .byte #0        ; zero padding to clear register when outside the sprite
+    .byte #%00000000;$94
+    .byte #%00011000;$94
+    .byte #%10100101;$94
+    .byte #%10100101;$94
+    .byte #%10100101;$94
+    .byte #%00111100;$94
+    .byte #%00011000;$94
+    .byte #%00000000;$94
+    .byte #%00000000;$94
+    .byte #%00000000;$00
+
+CSColor
+    .byte #0        ; pad to align the indicies with the CSBitmap
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$94;
+    .byte #$00;
+        
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Pad the cartridge to 4K
+
+    org $fffc
+    .word Start ; reset vector
+    .word Start ; BRK vector
