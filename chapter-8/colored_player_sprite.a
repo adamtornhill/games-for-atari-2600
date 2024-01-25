@@ -5,14 +5,17 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-; This cartridge draws a color sprite (i.e. VCS player object).
+; This cartridge animates a color sprite (i.e. VCS player object).
+; The sprite is a (very) cool software company's logo. We implement 
+; an effect where the sprite "floats" to the top of the screen.
 ;
-; Player objects are based on two TIA registers:
+; Some Atari VCS background info: player objects are based on 
+; two TIA registers:
 ;  1. GRP0 where we store the bitmap for that scanline
 ;  2. COLUP0 where we store the color for that scanline
 ; 
-; We implement the sprite using two tables in ROM and 
-; indirect addressing mode for the look up.
+; Implementation strategy: We implement the sprite using two 
+; tables in ROM and indirect addressing mode for the look up.
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -36,7 +39,7 @@ Start
     CLEAN_START
         
     ; position our sprite. Y goes from bottom to top
-    lda #80     ; fairly centered on screen
+    lda #0  ; start at the bottom of the screen
     sta YPos
 
 NextFrame
@@ -44,6 +47,10 @@ NextFrame
     ; the TIA line sync during VSYNC and overscan.
     VERTICAL_SYNC   ; 1 VBLANK + 3 VSYNC
     TIMER_SETUP 37  ; 37 VBLANK
+    ; The idle period during VBLANK is a great place for our 
+    ; sophisticated game logic. Let's use this time window 
+    ; to create the animation:
+    inc YPos
     TIMER_WAIT
     ; The 192 visible scanlines have to be iterated through; we 
     ; cannot use the PIA timer since we need to find the YPos of 
