@@ -1,0 +1,311 @@
+
+        processor 6502
+        include "vcs.h"
+        include "macro.h"
+        include "xmacro.h"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; Combine a playfield with a sprite.
+; The sprite is a car. The playfield is designded to look as 
+; obstacles which the car can drive behind.
+;
+; Implementation:
+; ==============
+; This example introduces the idea of a two-line kernel. In a 
+; two line kernel, each iteration of the main loop draws two 
+; scanlines. The first scanline is used to set up all the playfield 
+; graphics, the second scaline is used to position the sprite based 
+; on joystick input.
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        seg.u Variables
+        org $80
+
+PFPtr   word    ; pointer to playfield data
+PFIndex byte    ; offset into playfield array
+PFCount byte    ; lines left in this playfield segment
+Temp    byte    ; temporary
+YPos    byte    ; Y position of player sprite
+XPos    byte    ; X position of player sprite
+SpritePtr word  ; pointer to sprite bitmap table
+ColorPtr  word  ; pointer to sprite color table
+
+; Temporary slots used during kernel
+Bit2p0  byte
+Colp0   byte
+YP0     byte
+
+; Height of sprite in 2x scanlines
+SpriteHeight    equ 8
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        seg Code
+        org $f000
+
+Start
+        CLEAN_START
+; Set up initial pointers and player position        
+        lda #<PlayfieldData
+        sta PFPtr
+        lda #>PlayfieldData
+        sta PFPtr+1
+        lda #<Frame0
+        sta SpritePtr
+        lda #>Frame0
+        sta SpritePtr+1
+        lda #<ColorFrame0
+        sta ColorPtr
+        lda #>ColorFrame0
+        sta ColorPtr+1
+        lda #242
+        sta YPos
+        lda #38
+        sta XPos
+
+NextFrame
+        VERTICAL_SYNC
+
+; Set up VBLANK timer
+        TIMER_SETUP 37
+        lda #$F0
+        sta COLUBK      ; bg color
+        lda #$4
+        sta COLUPF      ; fg color
+        lda #$68
+        sta COLUP0      ; player color
+        lda #1
+        sta CTRLPF      ; symmetry
+        lda #0
+        sta PFIndex     ; reset playfield offset
+; Set temporary Y counter and set horizontal position
+        lda YPos
+        sta YP0         ; yp0 = temporary counter
+        lda XPos
+        ldx #0
+        jsr PositionHoriz
+        sta WSYNC
+        sta HMOVE       ; apply HMOVE to update the X position
+; Wait for end of VBLANK
+        TIMER_WAIT
+        lda #0
+        sta VBLANK
+
+; Not sure if we really need the following two lines: they are 
+; in the bug, so I go with them for now:
+; Set up timer (in case of bugs where we don't hit exactly)
+        TIMER_SETUP 192
+        SLEEP 10 ; to make timing analysis work out
+
+NewPFSegment
+; Load a new playfield segment.
+; Defined by length and then the 3 PF registers.
+; Length = 0 means stop
+        ldy PFIndex     ; load index into PF array
+        lda (PFPtr),y   ; load length of next segment
+        beq NoMoreSegs  ; == 0, we're done -> no more playfield patterns
+        sta PFCount     ; save for later
+; Prepare the registers with playfield data so that we can apply 
+; them directly after WSYNC (next scanline).
+; Remember that the playfield data has 4 data items for each iteration:
+;  1: Counter of N 2x scanlines, 2-4: PF0, PF1, PF2
+        iny
+        lda (PFPtr),y   ; load PF0
+        tax             ; PF0 -> X
+        iny
+        lda (PFPtr),y   ; load PF1
+        sta Temp        ; PF1 -> Temp
+        iny
+        lda (PFPtr),y   ; load PF2
+        iny             ; increment playfield index (next row)
+        sty PFIndex
+; WSYNC, apply the playfield data:
+        sta WSYNC
+        stx PF0         ; X -> PF0
+        sta PF2         ; Write PF2 first to save a tay-instruction
+        lda Temp        ; ..now we're free to use the accumulator..
+        sta PF1         ; ..for PF1
+; Load playfield length, we'll keep this in X for the loop
+        ldx PFCount
+KernelLoop
+; Does this scanline intersect our sprite?
+        lda #SpriteHeight       ; height in 2xlines
+        isb YP0                 ; isb is an "illegal" instruction: INC yp0, then SBC yp0
+        bcs .DoDraw             ; inside bounds?
+        lda #0                  ; no, load the padding offset (0)
+.DoDraw
+; Load color value for both lines, store in temp var
+        pha                     ; save the original offset on the stack
+        tay                     ; -> Y
+        lda (ColorPtr),y        ; color for both lines
+        sta Colp0               ; -> colp0
+; Load bitmap value for each line, store in temp var
+        pla                     ; pop the offset from the stack -> A
+        asl                     ; offset * 2
+        tay                     ; -> Y
+        lda (SpritePtr),y       ; bitmap for first line
+        sta Bit2p0              ; -> bit2p0
+        iny
+        lda (SpritePtr),y       ; bitmap for second line
+; WSYNC and store values for first line
+        sta WSYNC
+        sta GRP0        ; Bit1p0 -> GRP0
+        lda Colp0
+        sta COLUP0      ; Colp0 -> COLUP0
+        dex
+        beq NewPFSegment        ; end of this playfield segment?
+; WSYNC and store values for second line
+        sta WSYNC
+        lda Bit2p0
+        sta GRP0        ; Bit2p0 -> GRP0
+        jmp KernelLoop
+NoMoreSegs
+; Change colors so we can see when our loop ends
+        lda #0
+        sta COLUBK
+; Wait for timer to finish
+        TIMER_WAIT
+
+; Set up overscan timer. Use the overscan time to 
+; update the sprite position basedo n joystick input
+        TIMER_SETUP 29
+        lda #2
+        sta VBLANK
+        jsr MoveJoystick
+        TIMER_WAIT
+        jmp NextFrame
+
+PositionHoriz subroutine
+    sta WSYNC   ; wait for the next scanline
+    ; To find the rough X-position, we divide by 15.
+    ; We divide by 15 since that's the number of TIA 
+    ; clock cycles consumed by our instructions in the 
+    ; loop below (sbc and bcs).
+    ;
+    ; Of course, there's no division support on the 6502 so we 
+    ; need to subtract instead until A becomes negative.
+    sec         ; Always set carry when subtracting.
+.RoughXPosition         ; The . (dot) creates a local label.
+    sbc #15
+    bcs .RoughXPosition ; Until A is negative
+    ; The fine position can be set within -7 <-> +8 pixels.
+    ; To do this, we keep the reminder from our division 
+    ; and shift those bits left into the higher nibble; the HMP0 
+    ; registers wants it there.
+    eor #7
+    asl
+    asl
+    asl
+    asl
+    sta HMP0,x      ; the fine offset..
+    sta RESP0,x     ; ..and its coarse position.
+    rts
+
+
+; Read joystick movement and apply to object 0
+MoveJoystick
+; Move vertically
+; (up and down are reversed since YPos goes bottom->up)
+        ldx YPos
+        lda #%00100000  ;Up?
+        bit SWCHA
+        bne SkipMoveUp
+        cpx #175
+        bcc SkipMoveUp
+        dex
+SkipMoveUp
+        lda #%00010000  ;Down?
+        bit SWCHA 
+        bne SkipMoveDown
+        cpx #254
+        bcs SkipMoveDown
+        inx
+SkipMoveDown
+        stx YPos
+; Move horizontally
+        ldx XPos
+        lda #%01000000  ;Left?
+        bit SWCHA
+        bne SkipMoveLeft
+        cpx #1
+        bcc SkipMoveLeft
+        dex
+SkipMoveLeft
+        lda #%10000000  ;Right?
+        bit SWCHA 
+        bne SkipMoveRight
+        cpx #153
+        bcs SkipMoveRight
+        inx
+SkipMoveRight
+        stx XPos
+        rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        ; Use a compressed version of the playfield to 
+        ; save ROM space. Each line is a 4 byte field where
+        ; the first byte controls the height of the playfield 
+        ; pattern in terms of 2x scanlines. The following 3 bytes 
+        ; control the bitmaps for each of the playfield registers on 
+        ; those lines
+        align $100; make sure data doesn't cross page boundary
+PlayfieldData
+        ; Obstacles: I_  _______ _I
+        .byte  5,#%00101010,#%00000000,#%00000000
+        .byte  6,#%00101010,#%00000000,#%00000000
+        .byte  2,#%11101000,#%00001111,#%00111111
+        .byte  1,#%11100000,#%00001111,#%00111111
+        ; no playfield in the center of the screen:
+        .byte 65,#%00000000,#%00000000,#%00000000
+        ; mirrot the obstacles pattern:
+        .byte  1,#%11100000,#%00001111,#%00111111
+        .byte  2,#%11101000,#%00001111,#%00111111
+        .byte  6,#%00101010,#%00000000,#%00000000
+        .byte  5,#%00101010,#%00000000,#%00000000
+        ; pad:
+        .byte 4,#%00000000,#%00000000,#%00000000
+        .byte 0 ; byte zero terminates the drawing of the playfield
+
+;; Our sprite, make it look like a car:
+Frame0
+        .byte #%00000000;$04
+        .byte #%00000000;$04
+        .byte #%00000000;$04
+        .byte #%00000000;$04
+        .byte #%00110110;$04
+        .byte #%00110110;$04
+        .byte #%11111111;$40
+        .byte #%11111111;$40
+        .byte #%01100110;$94
+        .byte #%01100110;$94
+        .byte #%00111110;$40
+        .byte #%00111100;$30
+        .byte #%00000000;--
+        .byte #%00000000;--
+        .byte #%00000000;--
+        .byte #%00000000;--
+
+
+;---Color Data; a bit tricky since our sprite is 
+; 16 scanlines heigh, but we can only change color 
+; on every second scanline. Hence, the color table needs 
+; to have half the resolution of the sprite bitmpa table.
+; (8 lines of color, 16 lines of sprite bitmaps):
+ColorFrame0
+        .byte #$04;
+        .byte #$04;
+        .byte #$04;
+        .byte #$40;
+        .byte #$94;
+        .byte #$30;
+        .byte #$0E;
+        .byte #$0E;
+
+;;
+; Epilogue: pad the cartridge to 4K
+        org $fffc
+        .word Start
+        .word Start
