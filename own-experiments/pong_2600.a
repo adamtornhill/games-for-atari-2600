@@ -9,10 +9,12 @@
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-PaddleSpriteHeight  equ 10
+PaddleSpriteHeight  equ 20
 PaddleSpriteColor   equ #$0E
 PaddleFixedXPos     equ 5
-PaddleStartYPos     equ $76
+PaddleStartYPos     equ $60
+
+PaddleSpritePattern     equ #%00010000
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
@@ -118,7 +120,7 @@ MoveJoystick
     lda #%00100000  ;Up?
     bit SWCHA
     bne .SkipMoveUp
-    cpx #2      ; prevent exiting the upper screen
+    cpx #10     ; prevent exiting the bottom of the screen
     bcc .SkipMoveUp
     dex
     dex
@@ -126,7 +128,7 @@ MoveJoystick
     lda #%00010000  ;Down?
     bit SWCHA 
     bne .SkipMoveDown
-    cpx #183    ; prevent exiting the bottom of the screen
+    cpx #170    ; prevent exiting the upper screen
     bcs .SkipMoveDown
     inx
     inx
@@ -147,28 +149,13 @@ DrawPaddleSprite subroutine
     ;  - either the lookup index for the sprite byte, or
     ;  - zero to clear the sprite register when outside the relevant scanline
 .MaybeDrawSprite
-    tay     ; local coord -> Y
-    lda PaddleSprite,y  ; lookup color
+    cmp #0
+    beq .DoDrawSprite ; let A remain as 0 (zero) to disable the sprite
+    lda PaddleSpritePattern;PaddleSprite,y  ; lookup color
+.DoDrawSprite
     sta WSYNC   ; sync w/ scanline
     sta GRP0    ; store bitmap
     rts
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; The sprite data 
-
-PaddleSprite
-    .byte 0     ; zero padding when outside the sprite
-    .byte #%00000000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00010000;--
-    .byte #%00000000;--
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Pad the cartridge to 4K
