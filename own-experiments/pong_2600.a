@@ -11,7 +11,10 @@
 
 PaddleSpriteHeight  equ 20
 PaddleSpriteColor   equ #$0E
-PaddleFixedXPos     equ 5
+
+Paddle1_FixedXPos   equ 5
+Paddle2_FixedXPos   equ 12
+
 PaddleStartYPos     equ $60
 
 PaddleSpritePattern     equ #%00010000
@@ -24,10 +27,12 @@ PaddleSpritePattern     equ #%00010000
 
 ; Y goes from bottom to top. It refers to the lower part 
 ; of the paddle.
-PaddleSpriteYPos    .byte
-; Keep track of how many sprite line we have 
-; drawn, starting at PaddleSpriteYPos.
-PaddleLinesDrawn    .byte
+Paddle1_SpriteYPos  .byte
+Paddle2_SpriteYPos  .byte
+
+; A general purpose byte used to store the results of 
+; intermediate calculations:
+Temp            .byte
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
@@ -39,9 +44,11 @@ Start
     CLEAN_START
         
     lda #PaddleStartYPos    ; start centered
-    sta PaddleSpriteYPos
+    sta Paddle1_SpriteYPos
+    sta Paddle2_SpriteYPos
     lda PaddleSpriteColor
     sta COLUP0  ; store color
+    sta COLUP1
 
 NextFrame
     ; 262 scanlines in total. Use the xmcaros to simplify 
@@ -50,10 +57,15 @@ NextFrame
     TIMER_SETUP 37  ; 37 VBLANK
     ; This idle period during VBLANK is a great place for our 
     ; sophisticated game logic.
-    lda #0
-    sta PaddleLinesDrawn    ; start over for each frame
-    lda PaddleFixedXPos
+    ; 1. position Paddle 1 horizontally...
+    lda Paddle1_FixedXPos
     ldx #0  ; player object 1
+    jsr PositionHoriz
+    sta WSYNC
+    sta HMOVE   ; apply HMOVE to update the X position
+    ; 2. now do the same thing for Paddle 2:
+    lda Paddle2_FixedXPos
+    ldx #1  ; player object 2
     jsr PositionHoriz
     sta WSYNC
     sta HMOVE   ; apply HMOVE to update the X position
@@ -66,7 +78,11 @@ NextFrame
     ; our sprite and then start drawing it there.
     ldx #192    
 LVScan
-    jsr DrawPaddleSprite
+    ; TODO: figure out how to draw these on the same scanline...
+    jsr DrawPaddle_1_Sprite
+    dex ; move on to the next scanline
+    
+    jsr DrawPaddle_2_Sprite
     dex ; move on to the next scanline
     
     bne LVScan  ; repeat until 192 lines
@@ -116,7 +132,7 @@ PositionHoriz subroutine
 MoveJoystick
 ; Move vertically
 ; (up and down are actually reversed since ypos starts at bottom)
-    ldx PaddleSpriteYPos
+    ldx Paddle1_SpriteYPos
     lda #%00100000  ;Up?
     bit SWCHA
     bne .SkipMoveUp
@@ -133,14 +149,40 @@ MoveJoystick
     inx
     inx
 .SkipMoveDown
-    stx PaddleSpriteYPos
+    stx Paddle1_SpriteYPos
     rts
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; The following two subroutines encapsulate the knowledge of 
+; the inputs to the common subroutine, DrawPaddleSprite.
+DrawPaddle_1_Sprite subroutine
+    lda Paddle1_SpriteYPos  ; input to DrawPaddleSprite
+    sta Temp
+    ldy #0          ; sprite 1, input to DrawPaddleSprite
+    jsr DrawPaddleSprite
+    rts
+    
+DrawPaddle_2_Sprite subroutine
+    lda Paddle2_SpriteYPos  ; input to DrawPaddleSprite
+    sta Temp
+    ldy #1          ; sprite 2, input to DrawPaddleSprite
+    jsr DrawPaddleSprite
+    rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Draws the paddle sprite if we're at its scanlines.
+; This subroutine is reused to draw both player 1 & 2 using 
+; the following registers:
+;
+;   X    => contains the current scanline
+;   Y    => contains the player sprite, 0 for player 1, 1 for player 2
+;   Temp => contains the paddle Y-position.
+;
 DrawPaddleSprite subroutine
     ; are we at the scanline where YPos for our sprite starts?
     txa         ; let A contain the current scanline
     sec         ; 💡 always set carry for subtract
-    sbc PaddleSpriteYPos    
+    sbc Temp    
     cmp #PaddleSpriteHeight 
     bcc .MaybeDrawSprite ; yes, skip over the next instruction
     lda #0          ; no, so disable all sprites
@@ -151,10 +193,12 @@ DrawPaddleSprite subroutine
 .MaybeDrawSprite
     cmp #0
     beq .DoDrawSprite ; let A remain as 0 (zero) to disable the sprite
-    lda PaddleSpritePattern;PaddleSprite,y  ; lookup color
+    lda PaddleSpritePattern
 .DoDrawSprite
     sta WSYNC   ; sync w/ scanline
-    sta GRP0    ; store bitmap
+    ; The following works since GRP1 follows immediately after 
+    ; GRP0 in the TIA memory map:
+    sta GRP0,y  ; store the bitmap for player 1 _or_ 2 (Y-offset)
     rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
