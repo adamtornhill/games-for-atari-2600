@@ -16,6 +16,9 @@ Paddle1_FixedXPos   equ 5
 Paddle2_FixedXPos   equ 12
 
 PaddleStartYPos     equ $60
+BallStartXPos       equ 30
+BallStartYPos       equ 160
+ScreenRightEdge     equ 140
 
 PaddleSpritePattern     equ #%00010000
 
@@ -29,6 +32,10 @@ PaddleSpritePattern     equ #%00010000
 ; of the paddle.
 Paddle1_SpriteYPos  .byte
 Paddle2_SpriteYPos  .byte
+
+BallXPos        .byte
+BallYPos        .byte
+BallMovesRight      .byte
 
 ; A general purpose byte used to store the results of 
 ; intermediate calculations:
@@ -46,9 +53,16 @@ Start
     lda #PaddleStartYPos    ; start centered
     sta Paddle1_SpriteYPos
     sta Paddle2_SpriteYPos
+    lda #BallStartYPos
+    sta BallYPos
     lda PaddleSpriteColor
-    sta COLUP0  ; store color
+    sta COLUP0      ; store color
     sta COLUP1
+    sta COLUPF      ; ball uses the playfield color
+    lda #BallStartXPos
+    sta BallXPos
+    lda #0
+    sta BallMovesRight
 
 NextFrame
     ; 262 scanlines in total. Use the xmcaros to simplify 
@@ -61,12 +75,17 @@ NextFrame
     lda Paddle1_FixedXPos
     ldx #0  ; player object 1
     jsr PositionHoriz
-    sta WSYNC
-    sta HMOVE   ; apply HMOVE to update the X position
-    ; 2. now do the same thing for Paddle 2:
+    ; 2. now do the same thing for Paddle 2...
     lda Paddle2_FixedXPos
     ldx #1  ; player object 2
     jsr PositionHoriz
+    ; 3. ...and the ball:
+    lda BallXPos
+    ldx #4  ; ball object TODO!!
+    jsr PositionHoriz
+
+    ; Note that HMOVE updates *all* sprites, so we only want to 
+    ; do it once all our objects are positioned. Now is that time:
     sta WSYNC
     sta HMOVE   ; apply HMOVE to update the X position
     TIMER_WAIT
@@ -85,6 +104,9 @@ LVScan
     jsr DrawPaddle_2_Sprite
     dex ; move on to the next scanline
     
+    jsr DrawBall_Sprite
+    dex
+    
     bne LVScan  ; repeat until 192 lines
 
     ; Overscan
@@ -95,6 +117,8 @@ LVScan
     ; Now we have a few clock cycles during overscan where we 
     ; can process the joystick output:
     jsr MoveJoystick
+    ; ..and let the ball move:
+    jsr MoveBall
     TIMER_WAIT  ; end overscan
     jmp NextFrame
 
@@ -153,6 +177,14 @@ MoveJoystick
     rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Move the ball on each frame.
+MoveBall
+   ldx BallXPos
+   inx
+   stx BallXPos
+   rts
+   
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The following two subroutines encapsulate the knowledge of 
 ; the inputs to the common subroutine, DrawPaddleSprite.
 DrawPaddle_1_Sprite subroutine
@@ -167,6 +199,20 @@ DrawPaddle_2_Sprite subroutine
     sta Temp
     ldy #1          ; sprite 2, input to DrawPaddleSprite
     jsr DrawPaddleSprite
+    rts
+
+DrawBall_Sprite subroutine
+    txa         ; current scanline
+    cmp BallYPos
+    beq .DoDrawBall
+    lda #0
+    sta WSYNC   ; sync w/ scanline
+    sta ENABL
+    rts
+.DoDrawBall
+    lda #2      ; enable the ball
+    sta WSYNC   ; sync w/ scanline
+    sta ENABL
     rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
