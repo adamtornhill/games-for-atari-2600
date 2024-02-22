@@ -1,7 +1,13 @@
 # Games for Atari 2600
 
-This repo contains my versions of the exercises from the book Making Games for the Atari 2600 by Steven Hugg. 
-It's a great book, and fun to work through. Recommended!
+This repo contains my versions of the exercises from two books:
+1. Making Games for the Atari 2600 by Steven Hugg. 
+2. Programming Games for the Atari 2600 by Oscar Toledo G.
+ 
+Both books are  great, and fun to work through. Recommended!
+
+I have modified and tweaked the code, so these versions differ from the (probably) better versions as they  appear in the books. This is simply my way 
+of learning by working more actively with the material.
 
 ## The Platform
 
