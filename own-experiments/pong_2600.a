@@ -179,9 +179,13 @@ MoveJoystick
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Move the ball on each frame.
 MoveBall
-   ldx BallXPos
-   inx
-   stx BallXPos
+   lda BallXPos
+   adc #1
+   cmp #$79 ; ScreenRightEdge
+   bne .DoMove
+   lda #10 ; start over -- not correct...
+.DoMove
+   sta BallXPos
    rts
    
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
