@@ -59,12 +59,12 @@ PlaySound:
         beq StopSound
         dec DurationCounter
         clc
-        adc #2          ; drop the volume for each frame
+        adc #2          ; drop the volume on each frame (12 -> 2)
         sta AUDV0       ; volume, 0 (silence) -> 15 (loudest)
+        adc #5          ; lower the frequency on each frame (17 -> 7)
+        sta AUDF0
         lda #4          ; set the wawe form. 4 is a pure tone.
         sta AUDC0
-        lda #$11        ; 880 hz frequency (NTSC, but small difference on PAL).
-        sta AUDF0
         jmp WaitForNextFrame
         
 StopSound:
