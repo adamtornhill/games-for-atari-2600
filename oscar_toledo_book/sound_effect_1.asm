@@ -7,7 +7,7 @@
 ; On the VCS, we need to interlace sound with the drawing of 
 ; graphics + game logic.
 ;
-	processor 6502
+        processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
@@ -16,57 +16,60 @@
 ; Variables segment
 
         seg.u Variables
-	org $80
+        org $80
         
-DurationCounter	.byte
+DurationCounter .byte
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
 
-	seg Code
+        seg Code
         org $f000
 
 Start
-	CLEAN_START
+        CLEAN_START
 
 NextFrame:
-        lsr SWCHB	; test Game Reset switch
-        bcc Start	; reset cartridge?
+        lsr SWCHB       ; test Game Reset switch
+        bcc Start       ; reset cartridge?
         
-        lda #$88	; blue background
+        lda #$88        ; blue background
         sta COLUBK
 ; 1 + 3 lines of VSYNC
-	VERTICAL_SYNC
+        VERTICAL_SYNC
 ; 37 lines of underscan
-	TIMER_SETUP 37
+        TIMER_SETUP 37
         TIMER_WAIT
 ; 192 lines of frame
-	TIMER_SETUP 192
+        TIMER_SETUP 192
 
-        TIMER_WAIT	; timer is already 0, no-op
+        TIMER_WAIT      ; timer is already 0, no-op
 ; 29 lines of overscan
-	TIMER_SETUP 29
+        TIMER_SETUP 29
         
         ; Press joystick 1 button to launch the sound effect
         lda INPT4
-        bmi PlaySound	; negative (no jump) unless pressed
-        lda #10		; duration of the sound effect
+        bmi PlaySound   ; negative (no jump) unless pressed
+        lda DurationCounter
+        bne PlaySound   ; do not start a new sound if already playing
+        lda #10         ; start new sound -- duration of the sound effect
         sta DurationCounter
 PlaySound:
-	lda DurationCounter
+        lda DurationCounter
         beq StopSound
-	dec DurationCounter
-        lda #12		; volume, 0 (silence) -> 15 (loudest)
-        sta AUDV0
-        lda #4		; set the wawe form. 4 is a pure tone.
+        dec DurationCounter
+        clc
+        adc #2          ; drop the volume for each frame
+        sta AUDV0       ; volume, 0 (silence) -> 15 (loudest)
+        lda #4          ; set the wawe form. 4 is a pure tone.
         sta AUDC0
-        lda #$11	; 880 hz frequency (NTSC, but small difference on PAL).
+        lda #$11        ; 880 hz frequency (NTSC, but small difference on PAL).
         sta AUDF0
         jmp WaitForNextFrame
         
 StopSound:
-	lda #0
-        sta AUDV0	; turn of the sound
+        lda #0
+        sta AUDV0       ; turn of the sound
 WaitForNextFrame:
         TIMER_WAIT
 ; total = 262 lines, go to next frame
@@ -75,6 +78,6 @@ WaitForNextFrame:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Epilogue
 
-	org $fffc
-        .word Start	; reset vector
-        .word Start	; BRK vector
+        org $fffc
+        .word Start     ; reset vector
+        .word Start     ; BRK vector
