@@ -61,7 +61,7 @@ PlaySound:
         clc
         adc #2          ; drop the volume on each frame (12 -> 2)
         sta AUDV0       ; volume, 0 (silence) -> 15 (loudest)
-        adc #5          ; lower the frequency on each frame (17 -> 7)
+        lsr             ; lower the frequency on each frame (lsr -> / 2)
         sta AUDF0
         lda #4          ; set the wawe form. 4 is a pure tone.
         sta AUDC0
